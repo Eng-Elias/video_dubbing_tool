@@ -103,66 +103,137 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
         
         # Load audio
         print("Loading audio file...")
-        audio, sr = torchaudio.load(audio_path)
+        waveform, sample_rate = torchaudio.load(audio_path)
         
-        # Apply source separation
-        print("Applying source separation...")
-        # Add a batch dimension
-        audio = audio.unsqueeze(0)
+        # Resample if needed (Demucs expects 44.1kHz)
+        if sample_rate != 44100:
+            print(f"Resampling from {sample_rate}Hz to 44100Hz")
+            resampler = torchaudio.transforms.Resample(sample_rate, 44100)
+            waveform = resampler(waveform)
+            sample_rate = 44100
         
-        # Apply the model
-        sources = apply_model(model, audio.to(device), device=device)
+        # Convert to expected format
+        waveform = waveform.to(device)
         
-        # Get the accompaniment (music without vocals)
-        # The order is typically: drums, bass, other, vocals
-        # We want everything except vocals
-        if model.sources[-1] == "vocals":
-            # Sum all sources except vocals
-            accompaniment = sources[:, :-1].sum(dim=1)
+        # Apply the separation model
+        print("Applying source separation (this may take a while)...")
+        with torch.no_grad():
+            sources = apply_model(model, waveform.unsqueeze(0), device=device)[0]
+        
+        # Sources will be in order: drums, bass, other, vocals
+        # We want everything except vocals for the music track
+        drums = sources[0].cpu().numpy()
+        bass = sources[1].cpu().numpy()
+        other = sources[2].cpu().numpy()
+        
+        # Combine all non-vocal sources with appropriate levels
+        print("Combining instrumental tracks...")
+        drums_gain = 1.0
+        bass_gain = 1.2
+        other_gain = 1.0
+        
+        # Create a balanced mix
+        music = drums * drums_gain + bass * bass_gain + other * other_gain
+        
+        # Apply additional vocal removal using spectral masking
+        music = apply_spectral_vocal_reduction(music, sample_rate)
+        
+        # Apply dynamic range compression to make the music more consistent
+        music = apply_dynamic_compression(music, threshold=0.5, ratio=1.5)
+        
+        # Normalize the music to prevent clipping
+        print("Normalizing audio levels...")
+        if len(music.shape) > 1:
+            # Stereo normalization
+            max_val = np.max(np.abs(music))
+            if max_val > 0:
+                music = music / max_val * 0.9
         else:
-            # If vocals is not the last source, find its index
-            vocal_idx = model.sources.index("vocals")
-            # Create a mask for all sources except vocals
-            mask = torch.ones(len(model.sources), dtype=torch.bool)
-            mask[vocal_idx] = False
-            # Sum all sources except vocals
-            accompaniment = sources[:, mask].sum(dim=1)
+            # Mono normalization
+            max_val = np.max(np.abs(music))
+            if max_val > 0:
+                music = music / max_val * 0.9
         
-        # Apply spectral vocal reduction to further clean up any vocal remnants
-        accompaniment = accompaniment.squeeze(0).cpu().numpy()
+        # Apply a slight boost to make music more prominent
+        music = music * 1.5
         
-        # Apply additional vocal reduction
-        enhanced_music = apply_spectral_vocal_reduction(accompaniment, sr)
-        
-        # Apply dynamic compression to make the music more consistent
-        compressed_music = apply_dynamic_compression(enhanced_music)
-        
-        # Save the extracted music
-        sf.write(output_path, compressed_music.T, sr)
-        print(f"Music extracted and saved to {output_path}")
-        
+        # Save the processed music
+        print(f"Saving music track to {output_path}")
+        if len(music.shape) > 1:
+            # Transpose if needed for soundfile
+            sf.write(output_path, music.T, sample_rate)
+        else:
+            sf.write(output_path, music, sample_rate)
+            
+        print(f"Enhanced music track extracted to {output_path}")
         return output_path
         
     except Exception as e:
-        print(f"Error using Demucs: {e}")
-        print("Falling back to simple audio filtering...")
-        
-        # Fallback: Use simple filtering to try to preserve music
-        y, sr = librosa.load(audio_path, sr=None)
-        
-        # Apply bandpass filter (music often has more energy in mid-range frequencies)
-        lowcut = 100
-        highcut = 8000
-        y_filt = butter_bandpass_filter(y, lowcut, highcut, sr)
-        
-        # Apply simple compression to make the music more consistent
-        y_compressed = apply_simple_compression(y_filt)
-        
-        # Save the filtered audio
-        sf.write(output_path, y_compressed, sr)
-        print(f"Simple filtered audio saved to {output_path}")
-        
-        return output_path
+        print(f"Error extracting music with Demucs: {e}")
+        # Fallback method: try to extract music using harmonic-percussive source separation
+        try:
+            print("Falling back to librosa's HPSS for music extraction...")
+            y, sr = librosa.load(audio_path, sr=None)
+            
+            print("Performing harmonic-percussive source separation...")
+            # Compute the harmonic and percussive components
+            # Harmonic content often contains the musical elements we want to preserve
+            y_harmonic, y_percussive = librosa.effects.hpss(y)
+            
+            # Apply vocal reduction on the harmonic component
+            # Convert to frequency domain
+            print("Applying vocal reduction filter...")
+            D = librosa.stft(y_harmonic)
+            
+            # Get magnitude and phase
+            magnitude, phase = librosa.magphase(D)
+            
+            # Create a spectral mask that reduces frequencies in the speech range
+            freq_bins = librosa.fft_frequencies(sr=sr, n_fft=2048)
+            mask = np.ones_like(magnitude)
+            
+            # Identify bins in the vocal frequency range (200-3500 Hz)
+            vocal_bins = np.where((freq_bins >= 200) & (freq_bins <= 3500))[0]
+            
+            # Reduce these frequencies (but don't eliminate completely)
+            for i in vocal_bins:
+                if i < mask.shape[0]:
+                    mask[i, :] = 0.4  # Reduce by 60%
+            
+            # Apply the mask
+            magnitude_masked = magnitude * mask
+            
+            # Reconstruct the signal
+            D_masked = magnitude_masked * phase
+            y_harmonic_filtered = librosa.istft(D_masked)
+            
+            # Mix with some percussive content for a more balanced sound
+            print("Mixing harmonic and percussive components...")
+            music = y_harmonic_filtered * 0.8 + y_percussive * 0.5
+            
+            # Apply a band-pass filter to focus on typical music frequencies
+            print("Applying frequency filtering...")
+            b, a = butter_bandpass(lowcut=60, highcut=10000, fs=sr, order=4)
+            filtered_music = filtfilt(b, a, music)
+            
+            # Apply dynamic range compression
+            print("Applying dynamic range compression...")
+            compressed_music = apply_simple_compression(filtered_music, threshold=0.5, ratio=1.5)
+            
+            # Boost the volume for better audibility
+            compressed_music = compressed_music * 2.0
+            
+            # Normalize to prevent clipping
+            max_val = np.max(np.abs(compressed_music))
+            if max_val > 0:
+                compressed_music = compressed_music / max_val * 0.9
+            
+            sf.write(output_path, compressed_music, sr)
+            print(f"Enhanced fallback music extraction saved to {output_path}")
+            return output_path
+        except Exception as e2:
+            print(f"Fallback music extraction also failed: {e2}")
+            return None
 
 def apply_spectral_vocal_reduction(audio: np.ndarray, sr: int = 44100) -> np.ndarray:
     """Apply spectral masking to further reduce any vocal content."""
@@ -195,8 +266,17 @@ def apply_spectral_vocal_reduction(audio: np.ndarray, sr: int = 44100) -> np.nda
     
     return np.vstack([y_left, y_right])
 
-def apply_dynamic_compression(audio: np.ndarray, threshold: float = 0.3, ratio: float = 2.0) -> np.ndarray:
-    """Apply simple dynamic range compression."""
+def apply_dynamic_compression(audio: np.ndarray, threshold: float = 0.5, ratio: float = 2.0) -> np.ndarray:
+    """Apply dynamic range compression to audio.
+    
+    Args:
+        audio: Audio signal as numpy array
+        threshold: Compression threshold (0.0 to 1.0), signals above this level will be compressed
+        ratio: Compression ratio (higher values = more compression)
+        
+    Returns:
+        Compressed audio signal
+    """
     # If audio is mono, convert to stereo-like format for processing
     if len(audio.shape) == 1:
         audio = np.vstack([audio, audio])
@@ -259,119 +339,132 @@ def apply_simple_compression(audio: np.ndarray, threshold: float = 0.3, ratio: f
 
 def mix_audio_tracks(speech_path: str, music_path: str, output_path: str, speech_volume: float = 1.0, music_volume: float = 0.5) -> str:
     """Mix speech and music audio tracks with volume control and dynamic processing."""
-    print(f"Mixing speech and music with volumes: speech={speech_volume}, music={music_volume}")
+    print(f"Mixing speech and music tracks with enhanced process...")
+    print(f"Speech volume: {speech_volume}, Music volume: {music_volume}")
     
     # Load audio files
-    speech, speech_sr = sf.read(speech_path)
+    speech, speech_sr = librosa.load(speech_path, sr=None)
+    music, music_sr = librosa.load(music_path, sr=None)
     
-    # Make sure speech is mono
-    if len(speech.shape) > 1 and speech.shape[1] > 1:
-        speech = np.mean(speech, axis=1)
+    # Resample music to match speech sample rate if needed
+    if music_sr != speech_sr:
+        print(f"Resampling music from {music_sr}Hz to {speech_sr}Hz")
+        music = librosa.resample(music, orig_sr=music_sr, target_sr=speech_sr)
     
-    # Apply compression to speech to make it more consistent
-    speech = compress_dynamic_range(speech)
+    # Adjust lengths to match
+    if len(music) > len(speech):
+        print(f"Trimming music to match speech length")
+        music = music[:len(speech)]
+    elif len(music) < len(speech):
+        # Pad music with zeros to match speech length
+        print(f"Padding music to match speech length")
+        padding = np.zeros(len(speech) - len(music))
+        music = np.concatenate([music, padding])
     
-    # If music path is provided and exists, mix with speech
-    if music_path and os.path.exists(music_path):
-        music, music_sr = sf.read(music_path)
-        
-        # If music is stereo and speech is mono, convert speech to stereo
-        if len(music.shape) > 1 and music.shape[1] > 1 and len(speech.shape) == 1:
-            speech = np.column_stack((speech, speech))
-        
-        # If music is mono and speech is stereo, convert music to stereo
-        elif len(speech.shape) > 1 and speech.shape[1] > 1 and len(music.shape) == 1:
-            music = np.column_stack((music, music))
-        
-        # Resample music if necessary
-        if music_sr != speech_sr:
-            music = librosa.resample(music, orig_sr=music_sr, target_sr=speech_sr)
-        
-        # Make sure both arrays are the same length
-        max_len = max(len(speech), len(music))
-        if len(speech) < max_len:
-            if len(speech.shape) > 1:  # stereo
-                speech = np.vstack([speech, np.zeros((max_len - len(speech), speech.shape[1]))])
-            else:  # mono
-                speech = np.concatenate([speech, np.zeros(max_len - len(speech))])
-        if len(music) < max_len:
-            if len(music.shape) > 1:  # stereo
-                music = np.vstack([music, np.zeros((max_len - len(music), music.shape[1]))])
-            else:  # mono
-                music = np.concatenate([music, np.zeros(max_len - len(music))])
-        
-        # Find silent segments in speech
-        silent_segments = find_silent_segments(speech, threshold=0.02, min_length=0.5, sr=speech_sr)
-        
-        # Create a dynamic music volume envelope
-        music_envelope = np.ones(len(music)) * music_volume
-        
-        # Increase music volume during silent segments
-        for start_idx, end_idx in silent_segments:
-            # Add a small fade in/out to avoid abrupt volume changes
-            fade_samples = int(0.1 * speech_sr)  # 100ms fade
+    # Apply dynamic range compression to speech to make it more consistent
+    print("Compressing speech dynamic range")
+    speech = compress_dynamic_range(speech, threshold=0.3, ratio=2.0)
+    
+    # Find silent segments in speech (for adaptive music volume)
+    silent_segments = find_silent_segments(speech, threshold=0.02, min_length=0.5, sr=speech_sr)
+    
+    # Create a volume envelope for music (higher during silent speech segments)
+    music_envelope = np.ones_like(music) * music_volume
+    
+    # Increase music volume during silent segments
+    print(f"Applying dynamic music volume for {len(silent_segments)} silent segments")
+    for start, end in silent_segments:
+        if start < len(music_envelope) and end <= len(music_envelope):
+            # Fade in and out for smooth transitions
+            fade_samples = min(int(0.1 * speech_sr), (end - start) // 4)  # 100ms fade or 1/4 of segment
             
-            # Apply fade in
-            start_fade = max(0, start_idx - fade_samples)
-            for i in range(start_fade, start_idx):
-                ratio = (i - start_fade) / fade_samples
-                music_envelope[i] = music_volume + (music_volume * 0.5) * ratio
-            
-            # Set higher volume during silence
-            music_envelope[start_idx:end_idx] = music_volume * 1.5
-            
-            # Apply fade out
-            end_fade = min(len(music_envelope), end_idx + fade_samples)
-            for i in range(end_idx, end_fade):
-                ratio = 1 - ((i - end_idx) / fade_samples)
-                music_envelope[i] = music_volume + (music_volume * 0.5) * ratio
-        
-        # Apply the envelope to the music
-        if len(music.shape) > 1:  # stereo
-            for i in range(music.shape[1]):
-                music[:, i] = music[:, i] * music_envelope
-        else:  # mono
-            music = music * music_envelope
-        
-        # Apply speech clarity enhancement
-        speech = apply_speech_clarity_eq(speech, speech_sr)
-        
-        # Mix the audio
-        if len(speech.shape) > 1 and len(music.shape) > 1:  # both stereo
-            mixed = speech * speech_volume + music * music_volume
-        elif len(speech.shape) > 1:  # speech stereo, music mono
-            mixed = np.zeros_like(speech)
-            for i in range(speech.shape[1]):
-                mixed[:, i] = speech[:, i] * speech_volume + music * music_volume
-        elif len(music.shape) > 1:  # speech mono, music stereo
-            mixed = np.zeros_like(music)
-            for i in range(music.shape[1]):
-                mixed[:, i] = speech * speech_volume + music[:, i] * music_volume
-        else:  # both mono
-            mixed = speech * speech_volume + music * music_volume
-    else:
-        # No music, just use speech with volume adjustment
-        mixed = speech * speech_volume
+            # Only apply if segment is long enough for fades
+            if end - start > 2 * fade_samples:
+                # Set higher volume in silent segment
+                music_envelope[start+fade_samples:end-fade_samples] = music_volume * 1.5
+                
+                # Create fade in
+                fade_in = np.linspace(music_volume, music_volume * 1.5, fade_samples)
+                music_envelope[start:start+fade_samples] = fade_in
+                
+                # Create fade out
+                fade_out = np.linspace(music_volume * 1.5, music_volume, fade_samples)
+                music_envelope[end-fade_samples:end] = fade_out
     
-    # Apply soft clipping to prevent digital distortion
-    mixed = soft_clip(mixed)
+    # Apply volume adjustments with envelope for music
+    speech = speech * speech_volume
+    music = music * music_envelope
     
-    # Save mixed audio
+    # Apply a subtle EQ to make speech more clear
+    print("Applying speech clarity EQ")
+    speech = apply_speech_clarity_eq(speech, speech_sr)
+    
+    # Mix the tracks
+    print("Mixing speech and music tracks")
+    
+    # Ensure both arrays have exactly the same shape before mixing
+    if len(speech) != len(music):
+        print(f"Warning: Speech and music arrays have different lengths: speech={len(speech)}, music={len(music)}")
+        # Resize to the smaller of the two
+        min_length = min(len(speech), len(music))
+        speech = speech[:min_length]
+        music = music[:min_length]
+        print(f"Resized both arrays to length {min_length}")
+    
+    # Now they have the same shape and can be mixed safely
+    mixed = speech + music
+    
+    # Apply soft clipping to prevent digital distortion but preserve dynamics
+    max_val = np.max(np.abs(mixed))
+    if max_val > 1.0:
+        print(f"Applying soft clipping (max value: {max_val:.2f})")
+        mixed = soft_clip(mixed / max_val) * 0.95  # Leave some headroom
+    
+    # Save the mixed audio
     sf.write(output_path, mixed, speech_sr)
-    print(f"Mixed audio saved to {output_path}")
+    print(f"Enhanced mixed audio saved to {output_path}")
     
     return output_path
 
 def compress_dynamic_range(audio: np.ndarray, threshold: float = 0.3, ratio: float = 2.0) -> np.ndarray:
-    """Apply simple dynamic range compression."""
-    # Handle both mono and stereo
-    if len(audio.shape) > 1:  # stereo
-        compressed = np.zeros_like(audio)
+    """Apply dynamic range compression to audio.
+    
+    Args:
+        audio: Audio signal as numpy array
+        threshold: Compression threshold (0.0 to 1.0), signals above this level will be compressed
+        ratio: Compression ratio (higher values = more compression)
+        
+    Returns:
+        Compressed audio signal
+    """
+    # Handle both mono and stereo efficiently
+    is_stereo = len(audio.shape) > 1
+    
+    # Find samples above threshold
+    mask = np.abs(audio) > threshold
+    
+    # Apply compression to those samples
+    audio_compressed = audio.copy()
+    
+    if is_stereo:
+        # Process stereo channels
         for i in range(audio.shape[1]):
-            compressed[:, i] = apply_simple_compression(audio[:, i], threshold, ratio)
-        return compressed
-    else:  # mono
-        return apply_simple_compression(audio, threshold, ratio)
+            channel_mask = mask[:, i] if is_stereo else mask
+            audio_compressed[channel_mask, i] = np.sign(audio[channel_mask, i]) * (
+                threshold + (np.abs(audio[channel_mask, i]) - threshold) / ratio
+            )
+    else:
+        # Process mono
+        audio_compressed[mask] = np.sign(audio[mask]) * (
+            threshold + (np.abs(audio[mask]) - threshold) / ratio
+        )
+    
+    # Normalize to prevent clipping but maintain dynamics
+    max_val = np.max(np.abs(audio_compressed))
+    if max_val > 0.99:
+        audio_compressed = audio_compressed / max_val * 0.99
+    
+    return audio_compressed
 
 def find_silent_segments(audio: np.ndarray, threshold: float = 0.02, min_length: float = 0.5, sr: int = 22050) -> list:
     """Find segments where speech is silent or very quiet."""
@@ -465,12 +558,43 @@ def apply_speech_clarity_eq(audio: np.ndarray, sr: int) -> np.ndarray:
     return audio_eq
 
 def soft_clip(x: np.ndarray, threshold: float = 0.9) -> np.ndarray:
-    """Apply soft clipping to prevent harsh digital clipping."""
+    """Apply soft clipping to prevent harsh digital clipping while preserving dynamics.
+    
+    Args:
+        x: Audio signal as numpy array
+        threshold: Threshold above which soft clipping is applied (0.0 to 1.0)
+        
+    Returns:
+        Soft-clipped audio signal
+    """
+    # Find the maximum absolute value
+    max_val = np.max(np.abs(x))
+    
+    # If the signal is already within bounds, return it unchanged
+    if max_val <= threshold:
+        return x
+    
+    # Apply a more sophisticated soft clipping that preserves more dynamics
     # Handle both mono and stereo
     if len(x.shape) > 1:  # stereo
         clipped = np.zeros_like(x)
         for i in range(x.shape[1]):
-            clipped[:, i] = np.tanh(x[:, i] / threshold) * threshold
+            # Only apply clipping to samples that exceed the threshold
+            mask = np.abs(x[:, i]) > threshold
+            clipped[:, i] = x[:, i].copy()  # Start with original signal
+            
+            # Apply arctan-based soft clipping to samples above threshold
+            # This provides a smoother transition than tanh
+            clipped[mask, i] = np.sign(x[mask, i]) * (
+                threshold + (np.arctan((np.abs(x[mask, i]) - threshold) * (np.pi/2)) / np.pi)
+            )
         return clipped
     else:  # mono
-        return np.tanh(x / threshold) * threshold
+        clipped = x.copy()  # Start with original signal
+        mask = np.abs(x) > threshold
+        
+        # Apply arctan-based soft clipping to samples above threshold
+        clipped[mask] = np.sign(x[mask]) * (
+            threshold + (np.arctan((np.abs(x[mask]) - threshold) * (np.pi/2)) / np.pi)
+        )
+        return clipped

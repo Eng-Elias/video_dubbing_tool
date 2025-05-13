@@ -54,11 +54,13 @@ def main():
         # Audio processing options
         preserve_music = st.checkbox("Preserve background music", value=True)
         apply_noise_reduction = st.checkbox("Apply noise reduction", value=True)
+        keep_temp_files = st.checkbox("Save temporary files", value=False, 
+                                    help="Save intermediate files (extracted audio, music, etc.) for review")
         
         # Volume controls
         st.subheader("Volume Controls")
-        speech_volume = st.slider("Speech Volume", 0.1, 2.0, 1.0, 0.1)
-        music_volume = st.slider("Music Volume", 0.0, 1.0, 0.3, 0.05)
+        speech_volume = st.slider("Speech Volume", 0.0, 2.0, 1.5, 0.1)
+        music_volume = st.slider("Music Volume", 0.0, 2.0, 1.0, 0.1)
         
         # Advanced info
         st.markdown("---")
@@ -142,6 +144,19 @@ def main():
                             # Step 5: Merge with video
                             update_status(5)
                             
+                            # Create output directory for saving files
+                            temp_dir_path = None
+                            if keep_temp_files:
+                                # Create an output folder in the app directory
+                                output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+                                os.makedirs(output_dir, exist_ok=True)
+                                
+                                # Create a subdirectory with timestamp
+                                import datetime
+                                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                temp_dir_path = os.path.join(output_dir, f"dubbing_{timestamp}")
+                                status_text.text(f"Saving files to: {temp_dir_path}")
+                            
                             # Process the video (this actually does all the steps)
                             process_video(
                                 video_path=input_path,
@@ -153,8 +168,18 @@ def main():
                                 music_volume=music_volume,
                                 tts_model=TTS_MODEL,
                                 speaker=speaker if speaker != "Default" else None,
-                                target_language=TARGET_LANGUAGE
+                                target_language=TARGET_LANGUAGE,
+                                keep_temp_files=keep_temp_files,
+                                temp_dir_path=temp_dir_path
                             )
+                            
+                            # Show temp files location if saved
+                            if keep_temp_files and temp_dir_path:
+                                st.info(f"Temporary files saved to: {temp_dir_path}")
+                                # List the saved files
+                                temp_files = os.listdir(temp_dir_path)
+                                if temp_files:
+                                    st.expander("Saved temporary files", expanded=False).write("\n".join(temp_files))
                             
                             # Step 6: Finalize
                             update_status(6)
