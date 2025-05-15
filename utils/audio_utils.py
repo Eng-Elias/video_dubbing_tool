@@ -26,6 +26,143 @@ def extract_audio(video_path: str, output_path: Optional[str] = None) -> str:
     
     return output_path
 
+
+def extract_voice_sample(audio_path: str, output_path: Optional[str] = None, duration: float = 10.0) -> str:
+    """
+    Extract a clean voice sample from the input audio for voice cloning purposes.
+    
+    This function analyzes an audio file to find segments containing clean speech,
+    which are optimal for voice cloning. It applies noise reduction to improve quality
+    and uses energy-based voice activity detection to identify speech segments.
+    The function selects the best segments based on duration and energy level.
+    
+    Args:
+        audio_path: Path to the input audio file
+        output_path: Path where the voice sample will be saved.
+            If None, a default path will be generated based on the input filename.
+        duration: Target duration in seconds for the voice sample.
+            Defaults to 10.0 seconds.
+    
+    Returns:
+        Path to the extracted voice sample file
+    """
+    if output_path is None:
+        base_dir = os.path.dirname(audio_path)
+        base_name = os.path.splitext(os.path.basename(audio_path))[0]
+        output_path = os.path.join(base_dir, f"{base_name}_voice_sample.wav")
+    
+    print(f"Extracting voice sample from {audio_path}...")
+    
+    # Load the audio file
+    y, sr = librosa.load(audio_path, sr=None)
+    
+    # Apply noise reduction to get cleaner voice
+    y_reduced = nr.reduce_noise(
+        y=y,
+        sr=sr,
+        stationary=True,
+        prop_decrease=0.75
+    )
+    
+    def detect_speech_segments(audio: np.ndarray, sr: int, frame_length: int = 1024, hop_length: int = 512, threshold: float = 0.05) -> list:
+        """
+        Detect speech segments in an audio signal based on energy thresholding.
+        
+        Args:
+            audio: Audio signal as numpy array
+            sr: Sample rate of the audio
+            frame_length: Length of each frame for energy calculation
+            hop_length: Number of samples between frames
+            threshold: Energy threshold for speech detection
+            
+        Returns:
+            List of tuples containing (start_time, end_time) for each detected speech segment
+        """
+        # Calculate the energy of each frame
+        energy = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
+        
+        # Apply a threshold to detect speech frames
+        speech_frames = energy > threshold
+        
+        # Find speech segments
+        speech_segments = []
+        in_speech = False
+        start_frame = 0
+        prev_frame = 0
+        
+        for i, frame in enumerate(speech_frames):
+            if frame and not in_speech:
+                # Start of a speech segment
+                in_speech = True
+                start_frame = i
+            elif not frame and in_speech:
+                # End of a speech segment
+                in_speech = False
+                # Only add segments longer than 0.5 seconds
+                if (i - start_frame) * hop_length / sr > 0.5:
+                    start_time = start_frame * hop_length / sr
+                    end_time = i * hop_length / sr
+                    speech_segments.append((start_time, end_time))
+            prev_frame = i
+        
+        # Handle the case where the audio ends during speech
+        if in_speech:
+            end_time = len(audio) / sr
+            start_time = start_frame * hop_length / sr
+            if end_time - start_time > 0.5:
+                speech_segments.append((start_time, end_time))
+        
+        return speech_segments
+    
+    # Find speech segments
+    speech_segments = detect_speech_segments(y_reduced, sr)
+    
+    # Sort segments by duration (descending)
+    speech_segments.sort(key=lambda x: x[1] - x[0], reverse=True)
+    
+    # Collect segments until we reach the target duration
+    selected_segments = []
+    total_selected_duration = 0
+    
+    for start, end in speech_segments:
+        seg_duration = end - start
+        if total_selected_duration + seg_duration <= duration:
+            selected_segments.append((start, end))
+            total_selected_duration += seg_duration
+        
+        if total_selected_duration >= duration:
+            break
+    
+    # If we don't have enough segments, use what we have
+    if not selected_segments:
+        print("No clear speech segments found. Using the beginning of the audio.")
+        selected_segments = [(0, min(duration, len(y) / sr))]
+    
+    # Sort segments by start time
+    selected_segments.sort(key=lambda x: x[0])
+    
+    # Concatenate selected segments
+    voice_sample = np.array([])
+    for start, end in selected_segments:
+        start_sample = int(start * sr)
+        end_sample = int(end * sr)
+        segment = y_reduced[start_sample:end_sample]
+        voice_sample = np.concatenate((voice_sample, segment))
+    
+    # Apply additional noise reduction to the final sample
+    voice_sample = nr.reduce_noise(
+        y=voice_sample,
+        sr=sr,
+        stationary=True,
+        prop_decrease=0.8
+    )
+    
+    # Save the voice sample
+    sf.write(output_path, voice_sample, sr)
+    
+    print(f"Voice sample extracted and saved to {output_path} (duration: {len(voice_sample)/sr:.2f}s)")
+    return output_path
+
 def apply_noise_reduction(audio_path: str, output_path: Optional[str] = None) -> str:
     """Apply noise reduction to improve transcription accuracy."""
     if output_path is None:

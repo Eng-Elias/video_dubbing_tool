@@ -9,7 +9,7 @@ import tempfile
 from typing import List, Dict, Any, Optional
 from moviepy.editor import VideoFileClip
 
-from utils.audio_utils import extract_audio, apply_noise_reduction, extract_music, mix_audio_tracks
+from utils.audio_utils import extract_audio, apply_noise_reduction, extract_music, mix_audio_tracks, extract_voice_sample
 from utils.asr_utils import transcribe_audio
 from utils.tts_utils import initialize_tts, synthesize_speech
 from utils.video_utils import merge_audio_with_video
@@ -22,6 +22,7 @@ def create_dubbed_audio(
     temp_dir: str,
     speaker: Optional[str] = None,
     language: Optional[str] = None,
+    reference_wav: Optional[str] = None,
     max_segment_duration: float = 10.0,  # Maximum duration for any segment to prevent stretching
     keep_temp_files: bool = False  # Option to keep temporary segment files
 ) -> str:
@@ -66,7 +67,7 @@ def create_dubbed_audio(
         segment_files.append(seg_path)
         
         # Synthesize speech for this segment
-        synthesize_speech(tts, seg['text'], seg_path, speaker=speaker, language=language)
+        synthesize_speech(tts, seg['text'], seg_path, speaker=speaker, language=language, reference_wav=reference_wav)
         
         # Load the synthesized audio
         wav, sr = sf.read(seg_path)
@@ -180,6 +181,8 @@ def process_video(
     tts_model: str = "tts_models/en/ljspeech/tacotron2-DDC",
     speaker: Optional[str] = None,
     target_language: str = "en",
+    clone_voice: bool = False,
+    voice_sample_duration: float = 10.0,
     keep_temp_files: bool = False,
     temp_dir_path: Optional[str] = None
 ) -> str:
@@ -252,20 +255,42 @@ def process_video(
         duration = video.duration
         video.close()
         
-        # Step 6: Initialize TTS
-        tts = initialize_tts(tts_model, gpu=True)
+        # Step 6: Handle voice cloning if requested
+        reference_wav = None
+        if clone_voice and ('your_tts' in tts_model or 'xtts' in tts_model):
+            print("Voice cloning requested, extracting voice sample...")
+            try:
+                reference_wav = extract_voice_sample(
+                    extracted_audio,
+                    os.path.join(temp_dir, "voice_sample.wav"),
+                    duration=voice_sample_duration
+                )
+                print(f"Voice sample extracted: {reference_wav}")
+            except Exception as e:
+                print(f"Error extracting voice sample: {e}")
+                print("Continuing without voice cloning")
+                reference_wav = None
         
-        # Step 7: Get sample rate from a test synthesis
+        # Step 7: Initialize TTS
+        tts = initialize_tts(
+            tts_model, 
+            gpu=True,
+            reference_wav=reference_wav,
+            reference_speaker_lang=source_language
+        )
+        
+        # Step 8: Get sample rate from a test synthesis
         test_path = os.path.join(temp_dir, "test.wav")
         _, sample_rate = synthesize_speech(
             tts, 
             "Test", 
             test_path, 
             speaker=speaker, 
-            language=target_language
+            language=target_language,
+            reference_wav=reference_wav
         )
         
-        # Step 8: Create dubbed audio
+        # Step 9: Create dubbed audio
         dubbed_speech = create_dubbed_audio(
             segments, 
             tts, 
@@ -274,6 +299,7 @@ def process_video(
             temp_dir,
             speaker=speaker,
             language=target_language,
+            reference_wav=reference_wav,
             keep_temp_files=keep_temp_files  # Pass the keep_temp_files parameter
         )
         

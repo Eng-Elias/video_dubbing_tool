@@ -19,7 +19,8 @@ SUPPORTED_LANGUAGES = {
 }
 
 # Fixed model settings
-TTS_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
+DEFAULT_TTS_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
+VOICE_CLONING_MODEL = "tts_models/multilingual/multi-dataset/your_tts"  # Always use YourTTS for voice cloning
 TARGET_LANGUAGE = "en"  # Always dub to English
 
 def main():
@@ -43,15 +44,21 @@ def main():
             index=0
         )
         
-        # Speaker selection (if available)
-        speakers = list_speakers_for_model(TTS_MODEL)
-        speaker = st.selectbox(
-            "Speaker Voice",
-            speakers if speakers else ["Default"],
-            index=0
-        ) if speakers else None
+        # Voice cloning options
+        st.subheader("Voice Settings")
+        clone_voice = st.checkbox("Clone original voice", value=False, 
+                                help="Use AI to clone the original voice from the video")
+        
+        # TTS model selection based on cloning choice
+        if clone_voice:
+            # Use YourTTS for voice cloning
+            tts_model = VOICE_CLONING_MODEL
+        else:
+            # Standard TTS model
+            tts_model = DEFAULT_TTS_MODEL
         
         # Audio processing options
+        st.subheader("Audio Processing")
         preserve_music = st.checkbox("Preserve background music", value=True)
         apply_noise_reduction = st.checkbox("Apply noise reduction", value=True)
         keep_temp_files = st.checkbox("Save temporary files", value=False, 
@@ -66,7 +73,13 @@ def main():
         st.markdown("---")
         st.markdown("### Technical Info")
         st.markdown("- ASR: Whisper Medium")
-        st.markdown("- TTS: Tacotron2-DDC")
+        
+        # Show appropriate TTS model info
+        if clone_voice:
+            st.markdown("- TTS: YourTTS (Voice Cloning)")
+        else:
+            st.markdown("- TTS: Tacotron2-DDC")
+            
         st.markdown("- Target Language: English")
         st.markdown("- GPU Acceleration: Enabled")
     
@@ -157,21 +170,30 @@ def main():
                                 temp_dir_path = os.path.join(output_dir, f"dubbing_{timestamp}")
                                 status_text.text(f"Saving files to: {temp_dir_path}")
                             
-                            # Process the video (this actually does all the steps)
-                            process_video(
-                                video_path=input_path,
-                                output_path=output_path,
-                                source_language=SUPPORTED_LANGUAGES[source_lang],
-                                preserve_music=preserve_music,
-                                apply_noise_red=apply_noise_reduction,
-                                speech_volume=speech_volume,
-                                music_volume=music_volume,
-                                tts_model=TTS_MODEL,
-                                speaker=speaker if speaker != "Default" else None,
-                                target_language=TARGET_LANGUAGE,
-                                keep_temp_files=keep_temp_files,
-                                temp_dir_path=temp_dir_path
-                            )
+                            try:
+                                # Process the video (this actually does all the steps)
+                                process_video(
+                                    video_path=input_path,
+                                    output_path=output_path,
+                                    source_language=SUPPORTED_LANGUAGES[source_lang],
+                                    preserve_music=preserve_music,
+                                    apply_noise_red=apply_noise_reduction,
+                                    speech_volume=speech_volume,
+                                    music_volume=music_volume,
+                                    tts_model=tts_model,
+                                    speaker=None,
+                                    target_language=TARGET_LANGUAGE,
+                                    clone_voice=clone_voice,
+                                    voice_sample_duration=10.0,
+                                    keep_temp_files=keep_temp_files,
+                                    temp_dir_path=temp_dir_path
+                                )
+                            except Exception as e:
+                                # Show error message
+                                st.error(f"Error during dubbing: {str(e)}")
+                                st.exception(e)
+                                # Exit the try block
+                                raise e
                             
                             # Show temp files location if saved
                             if keep_temp_files and temp_dir_path:
