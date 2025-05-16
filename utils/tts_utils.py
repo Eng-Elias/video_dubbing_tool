@@ -1,6 +1,16 @@
 """
 TTS (Text-to-Speech) utility functions for video dubbing tool.
-Handles speech synthesis using Coqui TTS with support for voice cloning.
+
+This module provides functions for text-to-speech synthesis using Coqui TTS models,
+including support for voice cloning. It handles model initialization, speech synthesis,
+and provides utility functions for listing available speakers and languages.
+
+Key functions:
+- initialize_tts: Initialize a TTS model with optional voice cloning support
+- synthesize_speech: Generate speech from text with optional voice cloning
+- list_speakers_for_model: Get available speakers for a specific model
+- list_languages_for_model: Get available languages for a specific model
+- get_voice_cloning_models: Get information about available voice cloning models
 """
 import torch
 import importlib
@@ -17,14 +27,27 @@ def initialize_tts(
     """
     Initialize Coqui TTS model with optional voice cloning support.
     
+    This function initializes a Text-to-Speech model from the Coqui TTS library,
+    configuring it based on the specified parameters. It handles device selection
+    (CPU/GPU) and provides special handling for XTTS models that may have compatibility
+    issues with PyTorch 2.6+ due to the weights_only parameter change.
+    
+    Algorithm:
+    1. Check if GPU is available and should be used
+    2. Determine if voice cloning is requested based on model name and reference audio
+    3. For XTTS models, apply special handling to address PyTorch compatibility issues:
+       a. Try to add XttsConfig to torch safe globals
+       b. If that fails, temporarily patch torch.load to use weights_only=False
+    4. Initialize and return the TTS model
+    
     Args:
-        model_name: Name of the TTS model to use
+        model_name: Name of the TTS model to use (e.g., "tts_models/en/ljspeech/tacotron2-DDC")
         gpu: Whether to use GPU acceleration if available
         reference_wav: Path to reference audio file for voice cloning
         reference_speaker_lang: Language of the reference speaker for voice cloning
         
     Returns:
-        Initialized TTS model
+        Initialized TTS model ready for speech synthesis
     """
     print(f"Initializing TTS model: {model_name}")
     use_gpu = gpu and torch.cuda.is_available()
@@ -102,6 +125,19 @@ def synthesize_speech(
     """
     Synthesize speech using Coqui TTS with optional voice cloning support.
     
+    This function generates speech from text using a Coqui TTS model, handling various
+    model types including voice cloning models. It automatically detects if voice cloning
+    should be used based on the model name and reference audio availability.
+    
+    Algorithm:
+    1. Check if we're using a voice cloning model (YourTTS or XTTS) with reference audio
+    2. If using voice cloning:
+       a. Generate speech using the reference audio as the voice source
+    3. If not using voice cloning:
+       a. Prepare appropriate parameters based on model capabilities (speaker, language)
+       b. Generate speech using standard TTS
+    4. Load and return the generated audio file
+    
     Args:
         tts: Initialized TTS model
         text: Text to synthesize
@@ -154,13 +190,22 @@ def synthesize_speech(
 
 def list_speakers_for_model(model_name: str = "tts_models/en/ljspeech/tacotron2-DDC") -> List[str]:
     """
-    List available speakers for a specific model.
+    List available speakers for a specific TTS model.
+    
+    This function initializes a TTS model and retrieves the list of available speakers
+    if the model supports multiple speakers. For single-speaker models, it returns an
+    empty list.
+    
+    Algorithm:
+    1. Initialize the specified TTS model
+    2. Check if the model has a 'speakers' attribute
+    3. Return the list of speakers if available, otherwise return an empty list
     
     Args:
-        model_name: Name of the TTS model
+        model_name: Name of the TTS model to check for available speakers
         
     Returns:
-        List of available speaker IDs
+        List of available speaker IDs as strings
     """
     # Initialize the model
     tts = TTS(model_name)
@@ -173,13 +218,22 @@ def list_speakers_for_model(model_name: str = "tts_models/en/ljspeech/tacotron2-
 
 def list_languages_for_model(model_name: str = "tts_models/en/ljspeech/tacotron2-DDC") -> List[str]:
     """
-    List available languages for a specific model.
+    List available languages for a specific TTS model.
+    
+    This function initializes a TTS model and retrieves the list of available languages
+    if the model supports multiple languages. For single-language models, it returns an
+    empty list.
+    
+    Algorithm:
+    1. Initialize the specified TTS model
+    2. Check if the model has a 'languages' attribute
+    3. Return the list of languages if available, otherwise return an empty list
     
     Args:
-        model_name: Name of the TTS model
+        model_name: Name of the TTS model to check for available languages
         
     Returns:
-        List of available language codes
+        List of available language codes as strings
     """
     # Initialize the model
     tts = TTS(model_name)
@@ -195,8 +249,15 @@ def get_voice_cloning_models() -> List[Dict[str, str]]:
     """
     Get a list of available voice cloning models.
     
+    This function returns information about voice cloning models available in Coqui TTS.
+    Each model is represented as a dictionary with id, name, and description fields.
+    Currently, it returns information about YourTTS and XTTS v2 models.
+    
     Returns:
-        List of dictionaries containing model information
+        List of dictionaries containing model information with the following keys:
+        - id: Model identifier used for loading the model
+        - name: Human-readable name of the model
+        - description: Brief description of the model's capabilities
     """
     return [
         {

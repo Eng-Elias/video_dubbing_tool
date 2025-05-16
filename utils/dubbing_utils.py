@@ -1,6 +1,14 @@
 """
 Dubbing utility functions for video dubbing tool.
-Handles the complete dubbing pipeline and workflow.
+
+This module provides the core functionality for the video dubbing process,
+including the complete pipeline from audio extraction to final video generation.
+It coordinates the use of other utility modules for audio processing, speech
+recognition, text-to-speech synthesis, and video processing.
+
+Key functions:
+- create_dubbed_audio: Create dubbed audio from transcribed segments
+- process_video: Process a video through the complete dubbing pipeline
 """
 import os
 import numpy as np
@@ -27,7 +35,22 @@ def create_dubbed_audio(
     keep_temp_files: bool = False  # Option to keep temporary segment files
 ) -> str:
     """
-    Create dubbed audio from segments using Coqui TTS.
+    Create dubbed audio from transcribed segments using Coqui TTS.
+    
+    This function takes the transcribed segments (with text and timestamps) and synthesizes
+    speech for each segment, placing them at the appropriate timestamps in the final audio.
+    It handles time stretching to ensure segments fit within their original time slots and
+    manages temporary files for the process.
+    
+    Algorithm:
+    1. Create an empty audio array of the target duration
+    2. For each transcribed segment:
+       a. Synthesize speech for the segment text
+       b. Compare synthesized duration with original segment duration
+       c. Apply time stretching if necessary to match original timing
+       d. Place the segment in the final audio array at the correct timestamp
+    3. Save the complete audio to a file
+    4. Clean up temporary files if not keeping them
     
     Args:
         segments: List of transcribed segments with timing information
@@ -37,6 +60,7 @@ def create_dubbed_audio(
         temp_dir: Directory to store temporary files
         speaker: Speaker ID for multi-speaker models
         language: Language code for multi-language models
+        reference_wav: Path to reference audio file for voice cloning
         max_segment_duration: Maximum duration for any segment
         keep_temp_files: Whether to keep temporary segment files
         
@@ -189,17 +213,41 @@ def process_video(
     """
     Process a video through the complete dubbing pipeline.
     
+    This function orchestrates the entire video dubbing process, from audio extraction
+    to final video generation. It coordinates multiple steps including audio preprocessing,
+    speech recognition, music extraction, voice cloning (if requested), speech synthesis,
+    and final audio-video merging.
+    
+    Algorithm:
+    1. Create or use the specified temporary directory
+    2. Extract audio from the input video
+    3. Extract music track if requested
+    4. Apply noise reduction if requested
+    5. Transcribe and translate the audio using Whisper
+    6. Handle voice cloning if requested:
+       a. Extract a voice sample from the original audio
+       b. Use it with a voice cloning model (YourTTS)
+    7. Initialize the TTS model
+    8. Create dubbed audio by synthesizing speech for each segment
+    9. Mix speech with music if available
+    10. Merge the final audio with the original video
+    11. Clean up temporary files if not keeping them
+    
     Args:
         video_path: Path to the input video
         output_path: Path for the output dubbed video
-        source_language: Source language code or None for auto-detection
-        preserve_music: Whether to extract and preserve background music
-        apply_noise_red: Whether to apply noise reduction
-        speech_volume: Volume multiplier for speech
-        music_volume: Volume multiplier for music
-        tts_model: TTS model to use
-        speaker: Speaker ID for multi-speaker models
-        target_language: Target language code
+        source_language: Source language code (None for auto-detection)
+        preserve_music: Whether to try to preserve background music
+        apply_noise_red: Whether to apply noise reduction to audio
+        speech_volume: Volume multiplier for speech in output
+        music_volume: Volume multiplier for music in output
+        tts_model: TTS model to use for speech synthesis
+        speaker: Speaker ID for multi-speaker TTS models
+        target_language: Target language for dubbing
+        clone_voice: Whether to use voice cloning
+        voice_sample_duration: Duration of voice sample to extract for cloning
+        keep_temp_files: Whether to keep temporary files
+        temp_dir_path: Path to store temporary files (if None, uses a temporary directory)
         
     Returns:
         Path to the output dubbed video

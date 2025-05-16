@@ -1,6 +1,20 @@
 """
 Streamlit GUI for Video Dubbing Tool
-Supports English, Arabic, and Japanese video dubbing using Whisper and Coqui TTS.
+
+This application provides a user-friendly interface for dubbing videos into English
+using Whisper for speech recognition and Coqui TTS for speech synthesis. It supports
+multiple source languages and includes voice cloning capability to maintain the original
+speaker's voice characteristics in the dubbed version.
+
+Features:
+- Automatic speech recognition and translation using Whisper
+- Text-to-speech synthesis using Coqui TTS models
+- Voice cloning option to preserve the original speaker's voice
+- Background music preservation
+- Audio processing options (noise reduction, volume control)
+- Temporary file management for debugging
+
+Supported languages: English, Arabic, Japanese, and auto-detection
 """
 import streamlit as st
 import tempfile
@@ -24,6 +38,21 @@ VOICE_CLONING_MODEL = "tts_models/multilingual/multi-dataset/your_tts"  # Always
 TARGET_LANGUAGE = "en"  # Always dub to English
 
 def main():
+    """
+    Main application function that sets up the Streamlit UI and handles the video dubbing workflow.
+    
+    This function creates the user interface with Streamlit, processes user inputs,
+    and orchestrates the video dubbing process. It includes the following steps:
+    1. Set up the page configuration and layout
+    2. Create sidebar with options for language, voice settings, and audio processing
+    3. Handle file uploads and display the original video
+    4. Process the video when the user clicks the dubbing button
+    5. Display progress updates during processing
+    6. Show the dubbed video and provide download option when complete
+    
+    Returns:
+        None
+    """
     st.set_page_config(
         page_title="Video Dubbing Tool",
         page_icon="🎬",
@@ -130,17 +159,29 @@ def main():
                             
                             # Update status
                             def update_status(step, total_steps=6):
-                                progress_bar.progress(step / total_steps)
-                                status_messages = [
-                                    "Extracting audio...",
-                                    "Transcribing with Whisper...",
-                                    "Synthesizing speech...",
-                                    "Mixing audio...",
-                                    "Merging with video...",
-                                    "Finalizing..."
-                                ]
-                                status_text.text(status_messages[step-1])
-                                time.sleep(0.5)  # For visual feedback
+                                """
+                                Update the progress bar and status message during video processing.
+                                
+                                Args:
+                                    step (int): Current processing step (1-6)
+                                    total_steps (int): Total number of steps in the process (default: 6)
+                                    
+                                Returns:
+                                    None
+                                """
+                                progress = step / total_steps
+                                progress_bar.progress(progress)
+                                
+                                status_messages = {
+                                    1: "Extracting audio...",
+                                    2: "Applying noise reduction...",
+                                    3: "Transcribing and translating...",
+                                    4: "Synthesizing speech...",
+                                    5: "Merging audio with video...",
+                                    6: "Finalizing..."
+                                }
+                                
+                                status_text.text(status_messages.get(step, ""))
                             
                             # Step 1: Extract audio
                             update_status(1)

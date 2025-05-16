@@ -1,6 +1,18 @@
 """
 Audio utility functions for video dubbing tool.
-Handles audio extraction, noise reduction, and music extraction.
+
+This module provides functions for audio processing tasks required for video dubbing,
+including audio extraction, noise reduction, voice sample extraction for cloning,
+music extraction, and audio mixing.
+
+Key functions:
+- extract_audio: Extract audio from a video file
+- extract_voice_sample: Extract a clean voice sample for voice cloning
+- apply_noise_reduction: Reduce background noise in audio
+- extract_music: Extract music track while removing vocals
+- mix_audio_tracks: Mix speech and music tracks with volume control
+
+Additional utility functions for audio processing are also provided.
 """
 import os
 import librosa
@@ -14,7 +26,20 @@ import subprocess
 import torch
 
 def extract_audio(video_path: str, output_path: Optional[str] = None) -> str:
-    """Extract audio from video file."""
+    """
+    Extract audio from a video file and save it as a WAV file.
+    
+    This function uses MoviePy to extract the audio track from a video file and save it
+    as a high-quality WAV file. It preserves stereo audio if available, which is important
+    for better music separation in later processing steps.
+    
+    Algorithm:
+    1. If no output path is provided, generate one based on the input video filename
+    2. Load the video file using MoviePy's VideoFileClip
+    3. Extract the audio track and save it as a PCM WAV file (uncompressed for best quality)
+    4. Close the video file to free resources
+    5. Return the path to the extracted audio file
+    """
     if output_path is None:
         output_path = os.path.splitext(video_path)[0] + "_extracted.wav"
     
@@ -35,6 +60,17 @@ def extract_voice_sample(audio_path: str, output_path: Optional[str] = None, dur
     which are optimal for voice cloning. It applies noise reduction to improve quality
     and uses energy-based voice activity detection to identify speech segments.
     The function selects the best segments based on duration and energy level.
+    
+    Algorithm:
+    1. If no output path is provided, generate one based on the input audio filename
+    2. Load the audio file using librosa
+    3. Apply noise reduction to get cleaner voice
+    4. Detect speech segments using energy-based voice activity detection (VAD)
+    5. Sort segments by duration (longest first)
+    6. Collect multiple speech segments until reaching the target duration
+    7. Concatenate the selected segments to create a voice sample
+    8. Apply additional noise reduction to the final sample
+    9. Save the voice sample to the output path
     
     Args:
         audio_path: Path to the input audio file
@@ -164,7 +200,22 @@ def extract_voice_sample(audio_path: str, output_path: Optional[str] = None, dur
     return output_path
 
 def apply_noise_reduction(audio_path: str, output_path: Optional[str] = None) -> str:
-    """Apply noise reduction to improve transcription accuracy."""
+    """
+    Apply noise reduction to audio to improve transcription accuracy.
+    
+    This function processes an audio file to reduce background noise and remove
+    low-frequency rumble, which significantly improves the quality of speech
+    for transcription and voice cloning purposes.
+    
+    Algorithm:
+    1. If no output path is provided, generate one based on the input filename
+    2. Load the audio file using librosa
+    3. Estimate noise profile from the first 2 seconds (assumed to be non-speech)
+    4. Apply noise reduction using the noisereduce library
+    5. Apply a high-pass filter to remove low-frequency rumble (below 80Hz)
+    6. Save the processed audio to the output path
+    7. Return the path to the noise-reduced audio file
+    """
     if output_path is None:
         base, ext = os.path.splitext(audio_path)
         output_path = f"{base}_cleaned{ext}"
@@ -203,7 +254,28 @@ def butter_highpass(cutoff: float, fs: float, order: int = 5) -> Tuple:
     return b, a
 
 def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
-    """Extract music from the audio using Demucs with enhanced vocal removal."""
+    """
+    Extract music from the audio while removing vocal content.
+    
+    This function attempts to separate the music track from the input audio file,
+    removing vocals to create a clean instrumental track. It uses a two-tiered approach:
+    1. First try to use Demucs (Facebook's state-of-the-art source separation)
+    2. If Demucs fails or is not available, fall back to a spectral-based approach
+    
+    Algorithm:
+    1. If no output path is provided, generate one based on the input filename
+    2. Try to use Demucs for high-quality source separation:
+       a. Load the best available Demucs model
+       b. Process the audio to separate stems (vocals, drums, bass, other)
+       c. Combine all stems except vocals to create a music track
+       d. Apply post-processing to enhance quality
+    3. If Demucs fails, fall back to spectral-based vocal removal:
+       a. Apply spectral masking to reduce vocal content
+       b. Apply bandpass filtering to focus on musical frequencies
+       c. Apply dynamic compression to balance levels
+    4. Save the extracted music to the output path
+    5. Return the path to the extracted music file
+    """
     if output_path is None:
         base_dir = os.path.dirname(audio_path)
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
@@ -475,7 +547,25 @@ def apply_simple_compression(audio: np.ndarray, threshold: float = 0.3, ratio: f
     return compressed
 
 def mix_audio_tracks(speech_path: str, music_path: str, output_path: str, speech_volume: float = 1.0, music_volume: float = 0.5) -> str:
-    """Mix speech and music audio tracks with volume control and dynamic processing."""
+    """
+    Mix speech and music audio tracks with volume control and dynamic processing.
+    
+    This function combines a speech track with a music track, applying volume adjustments,
+    dynamic range compression, and equalization to create a balanced mix where speech
+    is clearly audible over the background music.
+    
+    Algorithm:
+    1. Load the speech and music audio files
+    2. Resample both to the same sample rate if needed
+    3. Apply speech clarity equalization to enhance intelligibility
+    4. Find silent segments in the speech track
+    5. Boost music volume during silent segments for a more natural sound
+    6. Apply volume adjustments to both tracks
+    7. Mix the tracks together
+    8. Apply soft clipping to prevent digital distortion
+    9. Save the mixed audio to the output path
+    10. Return the path to the mixed audio file
+    """
     print(f"Mixing speech and music tracks with enhanced process...")
     print(f"Speech volume: {speech_volume}, Music volume: {music_volume}")
     

@@ -1,6 +1,13 @@
 """
 Video utility functions for video dubbing tool.
-Handles merging dubbed audio and music with video.
+
+This module provides functions for video processing tasks required for video dubbing,
+primarily focusing on merging dubbed audio with the original video. It handles
+the combination of speech and music tracks with the video, ensuring proper
+synchronization and quality.
+
+Key functions:
+- merge_audio_with_video: Merge dubbed speech and optional music with the original video
 """
 import os
 from typing import Optional
@@ -18,6 +25,24 @@ def merge_audio_with_video(
 ) -> str:
     """
     Merge the dubbed speech and optional music with the original video.
+    
+    This function combines the original video with newly synthesized speech audio
+    and optionally a separated music track. It handles audio-video synchronization,
+    volume adjustment, and ensures the output video maintains high quality.
+    
+    Algorithm:
+    1. Load the original video to get properties (duration, frame rate)
+    2. Load the dubbed speech audio track
+    3. If a music track is provided:
+       a. Mix speech and music using the mix_audio_tracks function
+       b. Apply volume adjustments to both tracks
+    4. If no music track is provided, just adjust the speech volume
+    5. Ensure the audio duration matches the video duration:
+       a. If audio is shorter, loop it to match video length
+       b. If audio is longer, trim it to match video length
+    6. Set the final audio to the video
+    7. Write the output video with high-quality encoding settings
+    8. Clean up temporary files and free resources
     
     Args:
         video_path: Path to the original video file

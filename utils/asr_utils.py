@@ -1,6 +1,12 @@
 """
 ASR (Automatic Speech Recognition) utility functions for video dubbing tool.
-Handles transcription of audio using Whisper.
+
+This module provides functions for transcribing and translating audio using OpenAI's
+Whisper model. It handles the loading of appropriate Whisper models, device selection
+(CPU/GPU), and processing of audio files to extract text with timing information.
+
+Key functions:
+- transcribe_audio: Transcribe or translate audio using Whisper and return segments with timestamps
 """
 import whisper
 import torch
@@ -13,7 +19,17 @@ def transcribe_audio(
     language: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Transcribe audio using Whisper and return segments with timestamps.
+    Transcribe audio using OpenAI's Whisper model and return segments with timestamps.
+    
+    This function loads the specified Whisper model and processes the audio file to generate
+    a transcription or translation with detailed segment information including timestamps.
+    It automatically uses GPU acceleration if available for faster processing.
+    
+    Algorithm:
+    1. Load the specified Whisper model size (tiny, base, small, medium, large)
+    2. Use GPU if available, otherwise fall back to CPU
+    3. Process the audio file with the model to perform transcription or translation
+    4. Extract and return the segments with text and timing information
     
     Args:
         audio_path: Path to the audio file to transcribe
@@ -22,7 +38,7 @@ def transcribe_audio(
         language: Source language code (e.g., 'en', 'ja', 'ar') or None for auto-detection
         
     Returns:
-        List of segments with text and timing information
+        List of segment dictionaries containing text, start and end timestamps, etc.
     """
     print(f"Loading Whisper {model_size} model...")
     # Use GPU if available for faster processing
