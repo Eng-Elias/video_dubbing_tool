@@ -172,11 +172,11 @@ def synthesize_speech(
         kwargs = {"text": text, "file_path": output_path}
         
         # Add speaker if available and model supports it
-        if speaker and hasattr(tts, 'speakers') and speaker in tts.speakers:
+        if speaker and hasattr(tts, 'speakers') and tts.speakers is not None and speaker in tts.speakers:
             kwargs["speaker"] = speaker
             
         # Add language if available and model supports it
-        if language and hasattr(tts, 'languages') and language in tts.languages:
+        if language and hasattr(tts, 'languages') and tts.languages is not None and language in tts.languages:
             kwargs["language"] = language
             
         # Generate speech
