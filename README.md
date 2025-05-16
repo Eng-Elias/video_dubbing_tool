@@ -1,16 +1,18 @@
 # Video Dubbing Tool (Streamlit GUI)
 
-A fully-featured, multi-language video dubbing tool with a modern Streamlit GUI. Supports English, Arabic, and Japanese. Built for maintainability and speed with Whisper and Coqui TTS.
+A fully-featured, multi-language video dubbing tool with a modern Streamlit GUI. Supports English, Arabic, and Japanese. Built for maintainability and speed with Whisper and Coqui TTS. Now featuring voice cloning capabilities to preserve the original speaker's voice characteristics.
 
 ## Features
 
 - Upload and dub videos between English, Arabic, and Japanese
+- **Voice cloning** to preserve the original speaker's voice characteristics
 - Enhanced background music preservation with dynamic volume control
 - Adjustable speech and music volume controls
 - Option to save temporary processing files for review
 - Advanced audio processing with noise reduction and speech clarity enhancement
 - Precise audio-video synchronization
 - GPU acceleration (if available)
+- Comprehensive documentation with algorithm explanations
 - Modular, clean codebase
 - Fast dependency management with [uv](https://github.com/astral-sh/uv)
 
@@ -60,8 +62,9 @@ The app will open in your browser. Upload a video and start dubbing!
 
 ## Usage and Advanced Features
 
-### Audio Controls
+### Voice and Audio Controls
 
+- **Clone Original Voice**: Toggle to enable voice cloning using YourTTS (preserves the original speaker's voice)
 - **Speech Volume**: Adjust the volume of the synthesized speech (0.0-2.0, default: 1.5)
 - **Music Volume**: Adjust the volume of the background music (0.0-2.0, default: 1.0)
 - **Preserve Background Music**: Toggle to extract and preserve music from the original video
@@ -85,16 +88,18 @@ The app will open in your browser. Upload a video and start dubbing!
 - Requires Python 3.9+
 - Make sure [ffmpeg](https://ffmpeg.org/) is installed and on your PATH.
 - For best performance, use a machine with a CUDA-capable GPU.
+- Voice cloning works best with clear audio input and minimal background noise.
+- The YourTTS model is used for voice cloning as it provides the best compatibility and quality.
 
 ## Project Structure
 
-- `app.py`: Streamlit GUI
+- `app.py`: Streamlit GUI with user interface and workflow management
 - `utils/`: Modular utility code for audio, video, dubbing, and model management
-  - `audio_utils.py`: Audio processing functions (extraction, mixing, noise reduction)
-  - `video_utils.py`: Video processing functions
-  - `dubbing_utils.py`: Main dubbing pipeline
-  - `asr_utils.py`: Automatic speech recognition (Whisper)
-  - `tts_utils.py`: Text-to-speech synthesis (Coqui TTS)
+  - `audio_utils.py`: Audio processing functions (extraction, voice sample extraction, mixing, noise reduction)
+  - `video_utils.py`: Video processing functions for merging audio with video
+  - `dubbing_utils.py`: Main dubbing pipeline orchestration
+  - `asr_utils.py`: Automatic speech recognition using Whisper
+  - `tts_utils.py`: Text-to-speech synthesis with Coqui TTS and voice cloning support
 - `output/`: Directory for storing temporary processing files (when enabled)
 - `requirements.txt`: Main dependencies
 - `requirements.lock`: (Optional) Locked, reproducible environment
