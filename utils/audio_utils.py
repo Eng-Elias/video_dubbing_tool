@@ -600,6 +600,7 @@ def mix_audio_tracks(speech_path: str, music_path: str, output_path: str, speech
     # Apply dynamic range compression to speech to make it more consistent
     print("Compressing speech dynamic range")
     speech = compress_dynamic_range(speech, threshold=0.3, ratio=2.0)
+    speech *= 2.0
     
     # Find silent segments in speech (for adaptive music volume)
     silent_segments = find_silent_segments(speech, threshold=0.02, min_length=0.5, sr=speech_sr)
