@@ -331,9 +331,10 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
         
         # Sources will be in order: drums, bass, other, vocals
         # We want everything except vocals for the music track
-        drums = sources[0].cpu().numpy()
-        bass = sources[1].cpu().numpy()
-        other = sources[2].cpu().numpy()
+        # Convert to numpy and ensure float32 to avoid dtype issues later
+        drums = sources[0].cpu().numpy().astype(np.float32)
+        bass = sources[1].cpu().numpy().astype(np.float32)
+        other = sources[2].cpu().numpy().astype(np.float32)
         
         # Combine all non-vocal sources with appropriate levels
         print("Combining instrumental tracks...")
@@ -341,11 +342,14 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
         bass_gain = 1.2
         other_gain = 1.0
         
-        # Create a balanced mix
-        music = drums * drums_gain + bass * bass_gain + other * other_gain
+        # Create a balanced mix and ensure float32 dtype to avoid numpy dtype issues
+        music = (drums * drums_gain + bass * bass_gain + other * other_gain).astype(np.float32)
         
-        # Apply additional vocal removal using spectral masking
-        music = apply_spectral_vocal_reduction(music, sample_rate)
+        # Apply additional vocal removal using spectral masking (optional)
+        try:
+            music = apply_spectral_vocal_reduction(music, sample_rate)
+        except Exception as spec_err:
+            print(f"Spectral vocal reduction failed: {spec_err}. Continuing without it.")
         
         # Apply dynamic range compression to make the music more consistent
         music = apply_dynamic_compression(music, threshold=0.5, ratio=1.5)
@@ -402,12 +406,13 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
             mask = np.ones_like(magnitude)
             
             # Identify bins in the vocal frequency range (200-3500 Hz)
-            vocal_bins = np.where((freq_bins >= 200) & (freq_bins <= 3500))[0]
+            # Expand vocal range a bit and attenuate more aggressively
+            vocal_bins = np.where((freq_bins >= 150) & (freq_bins <= 4000))[0]
             
-            # Reduce these frequencies (but don't eliminate completely)
+            # Reduce these frequencies (up to 90% attenuation)
             for i in vocal_bins:
                 if i < mask.shape[0]:
-                    mask[i, :] = 0.4  # Reduce by 60%
+                    mask[i, :] = 0.05  # Reduce by 95% (stronger)
             
             # Apply the mask
             magnitude_masked = magnitude * mask
@@ -418,6 +423,10 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
             
             # Mix with some percussive content for a more balanced sound
             print("Mixing harmonic and percussive components...")
+            # Ensure both signals have the same length to avoid broadcasting errors (e.g. 2355200 vs 2355381)
+            min_len = min(len(y_harmonic_filtered), len(y_percussive))
+            y_harmonic_filtered = y_harmonic_filtered[:min_len]
+            y_percussive = y_percussive[:min_len]
             music = y_harmonic_filtered * 0.8 + y_percussive * 0.5
             
             # Apply a band-pass filter to focus on typical music frequencies
@@ -427,7 +436,7 @@ def extract_music(audio_path: str, output_path: Optional[str] = None) -> str:
             
             # Apply dynamic range compression
             print("Applying dynamic range compression...")
-            compressed_music = apply_simple_compression(filtered_music, threshold=0.5, ratio=1.5)
+            compressed_music = apply_simple_compression(filtered_music, threshold=0.5, ratio=1.5).astype(np.float32)
             
             # Boost the volume for better audibility
             compressed_music = compressed_music * 2.0
@@ -451,8 +460,8 @@ def apply_spectral_vocal_reduction(audio: np.ndarray, sr: int = 44100) -> np.nda
         audio = np.vstack([audio, audio])
     
     # Get the magnitude spectrogram
-    S_left = np.abs(librosa.stft(audio[0]))
-    S_right = np.abs(librosa.stft(audio[1]))
+    S_left = np.abs(librosa.stft(audio[0])).astype(np.float32)
+    S_right = np.abs(librosa.stft(audio[1])).astype(np.float32)
     
     # Vocal frequencies are typically between 200Hz and 3000Hz
     # Create a mask that reduces these frequencies
