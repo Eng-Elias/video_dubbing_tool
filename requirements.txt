@@ -1,14 +1,38 @@
 # Video Dubbing Tool (Streamlit GUI)
-torch>=1.13.0
-torchaudio>=0.13.0
-numpy==1.26.0
+# Core dependencies
+torch>=2.0.0
+torchaudio>=2.0.0
+torchvision>=0.16.0
+numpy>=1.22.0
 openai-whisper>=20240930
-TTS>=0.22.0
-moviepy==1.0.3
+
+# TTS with all language support
+TTS[all]>=0.22.0
+
+# Language-specific dependencies
+# For Japanese TTS
+jaconv>=0.3.4
+mecab-python3>=1.0.0
+unidic-lite>=1.0.8
+# For Arabic TTS
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+# For phonemizers
+phonemizer>=3.2.1
+inflect>=7.0.0
+
+# Audio/Video processing
+moviepy>=1.0.3
 ffmpeg-python>=0.2.0
 soundfile>=0.12.1
 librosa>=0.10.0
 noisereduce>=2.0.1
 scipy>=1.10.0
 demucs>=4.0.0
+
+# Web interface
 streamlit>=1.20.0
+
+# Additional utilities
+tqdm>=4.65.0
+requests>=2.31.0

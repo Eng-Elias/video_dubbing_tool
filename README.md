@@ -1,10 +1,10 @@
 # Video Dubbing Tool (Streamlit GUI)
 
-A fully-featured, multi-language video dubbing tool with a modern Streamlit GUI. Supports English, Arabic, and Japanese. Built for maintainability and speed with Whisper and Coqui TTS. Now featuring voice cloning capabilities to preserve the original speaker's voice characteristics.
+A fully-featured, multi-language video dubbing tool with a modern Streamlit GUI. Supports Arabic, and Japanese. Built for maintainability and speed with Whisper and Coqui TTS. Now featuring voice cloning capabilities to preserve the original speaker's voice characteristics.
 
 ## Features
 
-- Upload and dub videos between English, Arabic, and Japanese
+- Upload and dub videos between Arabic, and Japanese
 - **Voice cloning** to preserve the original speaker's voice characteristics
 - Enhanced background music preservation with dynamic volume control
 - Adjustable speech and music volume controls
@@ -15,6 +15,22 @@ A fully-featured, multi-language video dubbing tool with a modern Streamlit GUI.
 - Comprehensive documentation with algorithm explanations
 - Modular, clean codebase
 - Fast dependency management with [uv](https://github.com/astral-sh/uv)
+
+## Algorithm
+
+1. Create or use the specified temporary directory
+2. Extract audio from the input video
+3. Extract music track if requested
+4. Apply noise reduction if requested
+5. Transcribe and translate the audio using Whisper
+6. Handle voice cloning if requested:
+   1. Extract a voice sample from the original audio
+   2. Use it with a voice cloning model (YourTTS)
+7. Initialize the TTS model
+8. Create dubbed audio by synthesizing speech for each segment
+9. Mix speech with music if available
+10. Merge the final audio with the original video
+11. Clean up temporary files if not keeping them
 
 ## Quick Start
 
@@ -38,6 +54,11 @@ pip install uv
 
 ```sh
 uv pip install -r requirements.txt
+```
+
+For GPU (CUDA), also install:
+```sh
+uv pip install -r requirements_cuda.txt
 ```
 
 ### 4. (Recommended) Generate a Lockfile

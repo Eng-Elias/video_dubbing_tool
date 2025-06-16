@@ -14,7 +14,7 @@ Features:
 - Audio processing options (noise reduction, volume control)
 - Temporary file management for debugging
 
-Supported languages: English, Arabic, Japanese, and auto-detection
+Supported languages: Arabic, Japanese, and auto-detection
 """
 import streamlit as st
 import tempfile
@@ -27,7 +27,6 @@ from utils.tts_utils import list_speakers_for_model
 # Define supported languages
 SUPPORTED_LANGUAGES = {
     'Auto Detect': None,
-    'English': 'en',
     'Arabic': 'ar',
     'Japanese': 'ja',
 }
